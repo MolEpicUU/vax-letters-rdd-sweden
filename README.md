@@ -19,6 +19,9 @@ Georgios Varotsis, MSc, Ulf Hammar, BSc, Carl Bonander, PhD, Per Lundmark, PhD, 
 
 
 These are the files used for the analysis of the paper "Effect of COVID-19 Vaccination Appointment Letters on Uptake by Sociodemographic Characteristics: A Regression Discontinuity Analysis in Sweden, December 2020 to September 2021."
+
 **Varotsis_et_al_Vaccination_Letter_Data_Processing_Table1.R** This file contains all data processing and preparation, as well as the code for generating Table 1.
+
 **Varotsis_et_al_Vaccination_Letter_Primary_Secondary_Sensitivity_Analysis.R** This file includes the code for the primary, secondary, and sensitivity analyses. It also contains the code for generating Figure 1, Figure 2, Figure 3, Supplementary Table 1, Supplementary Table 2, and Supplementary Table 3. To obtain the results for the negative control analysis for the neighboring counties, use the file Varotsis_et_al_Vaccination_Letter_Primary_Secondary_Sensitivity_Analysis.R In line 50, set the variable ‘County_selection’ to ‘Gävle’ to get the results for Gävleborg County or to ‘Stockholm’ to get the results for Stockholm County.
+
 **Varotsis_et_al_Vaccination_Letter_Spillover_Analysis.R**: This file further processes the data for the spillover analysis and generates the results of the spillover analysis.
