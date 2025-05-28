@@ -1,0 +1,2078 @@
+---
+title: "Effect of COVID-19 Vaccination Appointment Letters on Uptake by Sociodemographic Characteristics: A Regression Discontinuity Analysis in Sweden, December 2020 to September 2021. Georgios Varotsis, MSc, Ulf Hammar, BSc, Carl Bonander, PhD, Per Lundmark, PhD, Beatrice Kennedy, PhD, Maria F. Gomez, MD, Mats Martinell, MD, Oliver J. Dyar, MD, Anna Sarkadi, MD, Robert Kristiansson, MD, Helena Svaleryd, PhD, Tove Fall, PhD"
+subtitle: "Spillover analysis for Uppsala"
+
+author: "Georgios Varotsis, MSc"
+created: "2023-11-29" 
+last updated: "2025-05-28"
+output: 
+  html_document:
+    theme: cerulean
+    toc: true 
+    fig_width: 6
+    fig_height: 4
+    number_sections: TRUE
+    toc_float:
+      collapsed: true
+      smooth_scroll: false
+    toc_depth: 4
+    code_folding: hide
+    hightlist: espresso
+    css: style.cs
+---
+
+# County selection
+
+
+Code for selecting County (click button on the right):
+```{r setup, message=FALSE, warning=FALSE, tidy = TRUE, error = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE
+)
+
+
+
+library(lmtest)
+library(tidyverse)
+library(broom)
+library(rdrobust)
+library(rddensity) 
+library(modelsummary) 
+library(data.table)
+library(rio)
+
+library(survey)
+library(rddapp)
+library(sandwich)
+library(lmtest)
+library(splines)
+library(epiDisplay)
+library(knitr)
+library(kableExtra)
+library(viridis)
+library(scales)
+library(rdrobust)
+library(rdrobust)
+library(splines)
+library(epiDisplay)
+library(forcats)
+
+
+
+County_selection <- 'Spillover - Uppsala' 
+
+file_to_import <- "data.csv"
+county_code <- 3
+plot_title <- "Spillover - Uppsala County"
+
+main_data_tbl <-  fread(file_to_import)
+main_data_tbl$V1 <- NULL
+
+
+main_data_tbl$First_dose_influenced <- as.Date(main_data_tbl$First_dose_influenced)
+main_data_tbl$vacc_date_opening_p_age_influenced    <- as.Date(main_data_tbl$vacc_date_opening_p_age_influenced   )
+
+main_data_tbl <- main_data_tbl %>% 
+  dplyr::select(-Letter_received_influenced) %>% 
+  rename(Letter_received = Letter_received_influencer)
+colnames(main_data_tbl) <- gsub('_influenced','',colnames(main_data_tbl))
+
+
+```
+
+## Creating the outcome
+
+Code for 0, 30 and 60 day outcome & population addition (click button on the right):
+```{r population-proportions-outcome, message=FALSE, warning=FALSE}
+
+
+
+pop <-  fread("data.csv")
+
+pop <-  pop %>% 
+  filter(P1105_LopNr_PersonNr %in% main_data_tbl$P1105_LopNr_PersonNr ) 
+
+
+pop <-  pop %>% 
+  left_join(main_data_tbl %>% 
+              dplyr::select(P1105_LopNr_PersonNr,FodelseArMan_influencer ), by = 'P1105_LopNr_PersonNr' )
+
+
+
+
+pop$Birth_year <- substr(pop$FodelseArMan, 1, 4)
+pop$Birth_month_influencer <- substr(pop$FodelseArMan, 5, 6)
+
+
+pop$Birth_year_influencer <- substr(pop$FodelseArMan_influencer, 1, 4)
+pop$Birth_month_influencer <- substr(pop$FodelseArMan_influencer, 5, 6)
+
+
+
+
+pop$birth_y_m_D <- as.Date(paste0(pop$Birth_year, '-',
+                                  pop$Birth_month, '-' ,
+                                  '01'),format = '%Y-%m-%d')
+
+pop$BirthYM_Cat <- paste0(substr(pop$FodelseArMan, 1, 4), '-', substr(pop$FodelseArMan, 5,6))
+
+pop$BirthYM_Cat <- factor(pop$BirthYM_Cat, 
+                          ordered = T,
+                          levels = unique(pop$BirthYM_Cat[order(pop$birth_y_m_D)])) 
+
+
+
+pop$birth_y_m_D_influencer <- as.Date(paste0(pop$Birth_year_influencer, '-',
+                                             pop$Birth_month_influencer, '-' ,
+                                             '01'),format = '%Y-%m-%d')
+
+pop$BirthYM_Cat_influencer <- paste0(substr(pop$FodelseArMan_influencer, 1, 4), '-', substr(pop$FodelseArMan_influencer, 5,6))
+
+pop$BirthYM_Cat_influencer <- factor(pop$BirthYM_Cat_influencer)#, 
+
+
+
+pop_per_month_cat <- pop %>% 
+  group_by(BirthYM_Cat_influencer) %>% 
+  summarise(population = n()) %>% 
+  ungroup() %>% 
+  arrange(BirthYM_Cat_influencer)
+
+pop_for_interaction_models <- pop %>% 
+  left_join(main_data_tbl %>% dplyr::select(P1105_LopNr_PersonNr, sex,Education, Ind_slr_cat, High_Low_Cntr,Educ_sex, Foreign_vs_Sweden ))
+
+pop_per_month_cat_education <- pop_for_interaction_models %>% 
+  group_by(BirthYM_Cat_influencer, Education) %>% 
+  summarise(population = n()) %>% 
+  ungroup()
+
+pop_per_month_cat_country <- pop_for_interaction_models %>% 
+  group_by(BirthYM_Cat_influencer, Foreign_vs_Sweden) %>%  # 
+  summarise(population = n()) %>% 
+  ungroup() 
+
+pop_per_month_cat_salary <- pop_for_interaction_models %>% 
+  group_by(BirthYM_Cat_influencer, Ind_slr_cat) %>% 
+  summarise(population = n()) %>% 
+  ungroup() 
+
+pop_per_month_cat_sex <- pop_for_interaction_models %>% 
+  group_by(BirthYM_Cat_influencer, sex) %>% 
+  summarise(population = n()) %>% 
+  ungroup()
+
+
+pop_per_month_cat_education_sex <- pop_for_interaction_models %>% 
+  group_by(BirthYM_Cat_influencer, Educ_sex) %>% 
+  summarise(population = n()) %>% 
+  ungroup()
+
+
+
+main_data_tbl$BirthYM_Cat_influencer <- as.character(main_data_tbl$BirthYM_Cat)
+
+
+main_data_tbl <- main_data_tbl %>% 
+  rename(Birth_year = Age_year,
+         Birth_month = Age_month,
+         Birth_year_influencer = Age_year_influencer,
+         Birth_month_influencer = Age_month_influencer) %>% 
+  mutate(Age_Round = floor(age_formula),
+         Age_Round_influencer = floor(age_formula_influencer))
+
+
+
+main_data_tbl$birth_y_m_D <- as.Date(paste0(main_data_tbl$Birth_year, '-',
+                                            main_data_tbl$Birth_month, '-' ,'01'),format = '%Y-%m-%d')
+
+main_data_tbl$BirthYM_Cat <- paste0(substr(main_data_tbl$FodelseArMan, 1, 4), '-', substr(main_data_tbl$FodelseArMan, 5,6))
+
+main_data_tbl$BirthYM_Cat <- factor(main_data_tbl$BirthYM_Cat, 
+                                    ordered = T,
+                                    levels = unique(main_data_tbl$BirthYM_Cat[order(main_data_tbl$birth_y_m_D)])) 
+
+
+
+
+main_data_tbl$birth_y_m_D_influencer <- as.Date(paste0(main_data_tbl$Birth_year_influencer, '-',
+                                                       main_data_tbl$Birth_month, '-' ,'01'),format = '%Y-%m-%d')
+
+main_data_tbl<- main_data_tbl %>% 
+  arrange(FodelseArMan_influencer)
+main_data_tbl$BirthYM_Cat_influencer <- paste0(substr(main_data_tbl$FodelseArMan_influencer, 1, 4), '-', substr(main_data_tbl$FodelseArMan_influencer, 5,6))
+
+main_data_tbl$BirthYM_Cat_influencer <- factor(main_data_tbl$BirthYM_Cat_influencer)# , 
+
+
+
+
+
+
+
+
+
+
+
+
+main_data_tbl$Year_Nmonth <- paste(main_data_tbl$Birth_year, (main_data_tbl$Birth_month %/% 2)+1, sep = '-')
+
+
+main_data_tbl$Year_Month <- paste(main_data_tbl$Birth_year, sprintf('%02d', main_data_tbl$Birth_month), sep ='-')
+main_data_tbl$bi_month <- cut(as.Date(paste(main_data_tbl$Birth_year, 
+                                            main_data_tbl$Birth_month, 
+                                            '01', 
+                                            sep = '-')), 
+                              breaks = '2 month', 
+                              labels = F)
+
+main_data_tbl$bi_month <- factor(main_data_tbl$bi_month, levels = unique(main_data_tbl$bi_month))
+
+
+
+
+main_data_tbl$bi_month_influencer <- cut(as.Date(paste(main_data_tbl$Birth_year_influencer, 
+                                                       main_data_tbl$Birth_month_influencer, 
+                                                       '01', 
+                                                       sep = '-')), 
+                                         breaks = '2 month', 
+                                         labels = F)
+
+main_data_tbl$bi_month_influencer <- factor(main_data_tbl$bi_month_influencer, levels = unique(main_data_tbl$bi_month_influencer))
+
+
+main_data_tbl_sum_90 <- main_data_tbl %>% 
+  filter(Vax_within_90 == 'Yes') %>% 
+  group_by(Letter_received, Birth_year_influencer, Birth_month_influencer, BirthYM_Cat_influencer) %>%
+  
+  summarize(pop_vaxed = n()) %>% 
+  ungroup()
+
+
+
+
+
+
+
+
+main_data_tbl_sum_90 <- main_data_tbl_sum_90 %>% 
+  left_join(pop_per_month_cat, by = 'BirthYM_Cat_influencer')
+
+
+
+
+main_data_tbl_sum_90$prop_vaxed <- (main_data_tbl_sum_90$pop_vaxed/main_data_tbl_sum_90$population)
+
+
+
+main_data_tbl_sum_90 <- main_data_tbl_sum_90 %>% 
+  mutate( #age_formula = (2021-Birth_year)+(6-Birth_month)/12,
+    age_formula_influencer = (2021-Birth_year_influencer)+(6-Birth_month_influencer)/12)# %>% 
+
+
+
+
+
+
+
+
+main_data_tbl_sum_0 <- main_data_tbl %>% 
+  filter(Vax_within_0 == 'Yes') %>% 
+  group_by(Letter_received, Birth_year_influencer, Birth_month_influencer, BirthYM_Cat_influencer) %>%
+  summarize(pop_vaxed = n()) %>% 
+  ungroup()%>% 
+  left_join(pop_per_month_cat, by = 'BirthYM_Cat_influencer')
+
+
+main_data_tbl_sum_0$prop_vaxed <- (main_data_tbl_sum_0$pop_vaxed/main_data_tbl_sum_0$population)
+
+
+main_data_tbl_sum_0 <- main_data_tbl_sum_0 %>% 
+  mutate( 
+    age_formula_influencer = (2021-Birth_year_influencer)+(6-Birth_month_influencer)/12)# %>% 
+
+
+
+
+
+
+
+main_data_tbl_logit <- main_data_tbl %>% 
+  mutate(
+    Vax_within_90 = case_when(
+      Vax_within_90 == 'Yes' ~ 1 ,
+      Vax_within_90 == 'No' ~ 0 ,
+      TRUE ~ NA
+    ),
+    Letter_received =  case_when( 
+      Letter_received == 'Letter' ~ 1 ,
+      Letter_received == 'No letter' ~ 0 ,
+      TRUE ~ NA
+    ),
+    
+    
+    
+    Education = factor(Education, 
+                       levels = c('Primary School', 'Gymnasium', 'University')),            
+    
+    High_Low_Cntr  = factor(High_Low_Cntr, 
+                            levels = c('Middle_Low', 'High')),           
+    
+  ) 
+
+
+
+
+
+
+```
+
+## Cut-off plot for intervention allocation
+
+### Using Age (agreed formula)
+
+age_formula = **(2021-Birth_year)+(6-Birth_month)/12**
+
+### Using Birthyear (Ulf formula)
+
+```{r fuzzy-sharp-yearbirth}
+ggplot(main_data_tbl, 
+       aes(x = Birth_year_influencer, 
+           y = Letter_received, 
+           color = Letter_received)) +
+  geom_point(size = 0.5, alpha = 0.3,
+             position = position_jitter(width = 0, height = 0.25, seed = 1234)) +
+  geom_vline(xintercept = 1971.5, linetype = 2) +
+  scale_color_manual(values = c('dodgerblue3','red3')) +   # 440155FF #481568FF
+  theme_classic()+
+  labs(x = "Partner's birth year"
+       , title = paste0(plot_title), y = "Received Letter") +
+  guides(color = FALSE)
+
+
+
+```
+
+## Check for discontinuity around checkpoint
+
+### Age Histogram
+
+Are there any big jumps around the threshold?
+
+There doesn't look like there's a jump around the cutoff
+
+```{r determine-gap, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+every_nth = function(n) {
+  return(function(x) {x[c(TRUE, rep(FALSE, n-1))]})
+}
+
+ggplot(main_data_tbl %>% 
+         mutate(Birth_year_influencer =as.character(Birth_year_influencer)), 
+       aes(x = Birth_year_influencer, 
+           fill = Letter_received)) +
+  
+  geom_histogram(binwidth = 2, #bins = 92,
+                 color = "white",
+                 stat = 'count',
+                 boundary = 70) +
+  scale_x_discrete(breaks = every_nth(n=5))+
+  scale_fill_manual(values = c('dodgerblue3','red3'),
+                    labels=c('Yes', 'No')) +   # '#26547c','#ef476f'    440155FF #481568FF
+  
+  
+  geom_vline(xintercept = as.character(1971), 
+             alpha = 0.5,
+             linewidth = 0.9, linetype = 2, colour = 'black') +
+  
+  theme_classic()+
+  theme(
+    axis.text.x = element_text(angle = 90,
+                               size = 8,vjust = 0.5, hjust =1)
+  )+
+  labs(x = "Partner's birth Year",
+       title = paste0(plot_title), 
+       y = "Count", 
+       fill = "Letter")
+
+
+
+
+```
+
+# Discontinuity in the Outcome
+
+**Remember** : With our analysis we are looking at the intention to treat; we are looking at the effect of sending the letters, not when the letters were received exactly from each individual or whether the letters were even opened at all!
+
+
+## Tables
+
+### Table A: Participants (N) per birth year
+
+```{r participants-per-year-month, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(knitr)
+library(kableExtra)
+
+
+
+main_data_tbl %>% 
+  count(Birth_year_influencer) %>% 
+  kable %>% 
+  kable_styling('striped', full_width = F) %>% 
+  scroll_box(width = '500px' ,height = '200px') 
+
+```
+
+### Table B: Participants (N) per month and birth year
+
+```{r table-month-year, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+main_data_tbl %>% 
+  count(BirthYM_Cat_influencer) %>% 
+  kable %>% 
+  kable_styling('striped', full_width = F) %>% 
+  scroll_box(width = '500px' ,height = '200px') 
+
+```
+
+
+## Outcome Plots 
+
+### Vaccinated with 90d
+
+```{r outcome-plot-90, echo=FALSE, message=FALSE, warning=FALSE}
+
+data_for_text_label <- data.frame(Letter_received= c('Letter','No letter'),
+                                  age_formula_influencer = c(55, 44),
+                                  label = c('Letter notification', 'Self-booking'))
+
+ggplot(main_data_tbl_sum_90, aes(x = age_formula_influencer, 
+                                 y = prop_vaxed, 
+                                 fill = Letter_received,
+                                 color = Letter_received)) +
+  geom_vline(xintercept = 49.5) +
+  
+  
+  geom_text(data=data_for_text_label,
+            aes(x = age_formula_influencer,
+                y= 0.98, #0.95,
+                fill = Letter_received,
+                label = label,
+                color = Letter_received),
+            size =5.5
+  ) + 
+  geom_point(size = 0.8, alpha = 0.3) +
+  
+  geom_smooth(data = filter(main_data_tbl_sum_90, Birth_year_influencer <= 1971), method = "lm") +
+  geom_smooth(data = filter(main_data_tbl_sum_90, Birth_year_influencer > 1971), method = "lm") +
+  
+  scale_y_continuous(labels = scales::percent)+
+  
+  scale_color_manual(values = c('dodgerblue3','red3'),
+                     labels=c('Letter notification', 'Self-booking')) +   # '#26547c','#ef476f'    440155FF #481568FF
+  scale_fill_manual(values = c('dodgerblue1','red1'),
+                    labels=c('Letter notification', 'Self-booking')) +   # '#26547c','#ef476f'    440155FF #481568FF
+  
+  labs(x = "Partner's age (years)"
+       , y = "Proportion vaccinated within 90 days of the opening"
+       , color = "Intervention:", title = paste0(plot_title),
+       fill = "Intervention:") + 
+  theme_classic()
+
+
+
+
+```
+
+
+### Vaccinated with 90d - Zoom in
+
+Here, we have smoothed lines based on a **narrow bandwidth** (thus lines based on observations closer to thethreshold). This helps us zoom in around the intervention point.
+
+```{r outcome-plot-zoom, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+bandwidth_plot <- 3
+
+
+ggplot(main_data_tbl_sum_90, aes(x = age_formula_influencer, 
+                                 y = prop_vaxed, 
+                                 fill = Letter_received,
+                                 color = Letter_received)) +
+  geom_vline(xintercept = 49.5) +
+  
+  
+  geom_text(data=data_for_text_label,
+            aes(x = age_formula_influencer,
+                y= 0.98, #0.95,
+                fill = Letter_received,
+                label = label,
+                color = Letter_received),
+            size =5.5
+  ) + 
+  geom_point(size = 0.8, alpha = 0.3) +
+  
+  geom_smooth(data = filter(main_data_tbl_sum_90, Birth_year_influencer >= (1971-bandwidth_plot) & Birth_year_influencer <= 1971), method = "lm") +
+  geom_smooth(data = filter(main_data_tbl_sum_90, Birth_year_influencer > 1971 & Birth_year_influencer <= (1971+bandwidth_plot) ), method = "lm") +
+  
+  
+  scale_y_continuous(labels = scales::percent)+
+  
+  scale_color_manual(values = c('dodgerblue3','red3'),
+                     labels=c('Letter notification', 'Self-booking')) +   # '#26547c','#ef476f'    440155FF #481568FF
+  scale_fill_manual(values = c('dodgerblue1','red1'),
+                    labels=c('Letter notification', 'Self-booking')) +   # '#26547c','#ef476f'    440155FF #481568FF
+  
+  labs(x = "Partner's age (years)"
+       , y = "Proportion vaccinated within 90 days of the opening"
+       , color = "Intervention:", title = paste0(plot_title, ' (narrow bandwidth)'),
+       fill = "Intervention:") + 
+  theme_classic()
+
+
+
+
+
+```
+
+
+### Vaccinated with 0d
+
+```{r outcome-plot-0, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+ggplot(main_data_tbl_sum_0, aes(x = age_formula_influencer, 
+                                y = prop_vaxed, 
+                                fill = Letter_received,
+                                color = Letter_received)) +
+  geom_vline(xintercept = 49.5) +
+  
+  geom_point(size = 0.8, alpha = 0.3) +
+  
+  geom_smooth(data = filter(main_data_tbl_sum_0, Birth_year_influencer <= 1971), method = "lm") +
+  geom_smooth(data = filter(main_data_tbl_sum_0, Birth_year_influencer > 1971), method = "lm") +
+  
+  scale_y_continuous(labels = scales::percent)+
+  
+  scale_color_manual(values = c('dodgerblue3','red3'),
+                     labels=c('Letter notification', 'Self-booking')) +   # '#26547c','#ef476f'    440155FF #481568FF
+  scale_fill_manual(values = c('dodgerblue1','red1'),
+                    labels=c('Letter notification', 'Self-booking')) +   # '#26547c','#ef476f'    440155FF #481568FF
+  
+  labs(x = "Partner's age (years)"
+       , y = "Proportion vaccinated within 90 days of the opening"
+       , color = "Intervention:", title = paste0(plot_title),
+       fill = "Intervention:") + 
+  theme_classic()
+
+
+```
+
+
+# Discontinuity analysis
+
+## Logistic Regression
+
+### Simple LogReg
+Code forsimple LogReg:
+```{r discontinuity-LG-main, echo = FALSE, warning = FALSE}
+
+library(splines)
+library(epiDisplay)
+model_simple_Age_spline <- glm(Vax_within_90  ~ Letter_received +  
+                                 bs(age_formula_influencer ,knots = 49.5, degree = 1),
+                               family=binomial(link='logit'), 
+                               data = main_data_tbl_logit)
+
+
+results_logreg_simple <- logistic.display(model_simple_Age_spline)
+OR_simple <- results_logreg_simple$table[1,1]
+CI_low_simple <- results_logreg_simple$table[1,2]
+CI__high_simple <- results_logreg_simple$table[1,3]
+pvalue_simple <- results_logreg_simple$table[1,4]
+
+
+
+library(sandwich)
+library(lmtest)
+
+
+
+wald_test_covariates <- coeftest(model_simple_Age_spline, vcov = vcovHC)
+
+
+p_value_wald <- wald_test_covariates[2,4]
+
+
+
+library(broom)
+library(lmtest)
+model_for_robust_SIMPLEST_rbst  <- broom::tidy(coeftest(model_simple_Age_spline, vcov = vcovHC), conf.int = TRUE)
+CI_low_simple_rbst <- exp(model_for_robust_SIMPLEST_rbst$conf.low)[2]
+CI__high_simple_rbst <- exp(model_for_robust_SIMPLEST_rbst$conf.high)[2]
+
+
+number_obs_simple <- (nobs(model_simple_Age_spline))
+
+```
+
+
+
+### LogReg with Kernel weights
+
+
+Code for bandwidth calculation
+```{r logreg-kernel-bandwidth, warning=FALSE}
+
+
+
+
+
+
+
+
+
+
+library(rddapp)
+bandwidth_imbens <- rddapp::rd_est(Vax_within_90  ~  age_formula_influencer | Letter_received,  # age_formula_influencer | Letter_received, 
+                                   data = main_data_tbl_logit, 
+                                   cutpoint = 49.5,
+                                   kernel = 'epanechnikov',
+                                   t.design = 'geq', # geq means the treatment is assigned if 'x' is greater than or equal to its cutoff
+                                   bw = 'IK12') # IK12 imbens from 2012, IK09 Imbens from 2009
+
+selected_bandwidth_imbens <- bandwidth_imbens$bw[4]
+
+
+
+library(rdrobust)
+bandwidth_CalonicoCattaneo <-  rdbwselect(y = main_data_tbl_logit$Vax_within_90,
+                                          x = main_data_tbl_logit$age_formula_influencer, 
+                                          c = 49.5)
+
+selected_bandwidth_Calonico <-bandwidth_CalonicoCattaneo$bws[2]
+
+
+
+optimal_bandwidth <- selected_bandwidth_imbens
+
+```
+#### Kernels
+
+
+Code for Epanechnikov and Gaussian function and weights:
+```{r logreg-kernel-epanechnikov, warning = FALSE}
+
+
+
+Epanechnikov_kernel_IK <- function(x, xi = 49.5, bandwidth = selected_bandwidth_imbens ) {
+  u <- abs((x-xi)/bandwidth)
+  return(ifelse(u <= 1, 3/4 * (1-u^2), 0))
+}
+
+weights_Epanechnikov_IK <- Epanechnikov_kernel_IK(main_data_tbl_logit$age_formula_influencer)
+
+
+Epanechnikov_kernel_CCT <- function(x, xi = 49.5, bandwidth = selected_bandwidth_Calonico ) {
+  u <- abs((x-xi)/bandwidth)
+  return(ifelse(u <= 1, 3/4 * (1-u^2), 0))
+}
+
+weights_Epanechnikov_CCT <- Epanechnikov_kernel_CCT(main_data_tbl_logit$age_formula_influencer)
+
+
+
+Gaussian_kernel <-  function(x, bandwidth = selected_bandwidth_imbens ) {
+  return(dnorm((x - 49.5) / bandwidth))
+}
+
+weights_Gaussian <- Gaussian_kernel(main_data_tbl_logit$age_formula_influencer)
+
+
+
+
+
+
+
+
+weights_4_model <- weights_Epanechnikov_IK
+
+
+
+```
+
+
+#### CCT weights
+
+
+
+Code for CCT-weight log reg model:
+```{r logreg-kerne-CTT, warning = FALSE}
+
+library(survey)
+model_simple_Kernels_design_CCT <- svydesign(id = ~ 1, data = main_data_tbl_logit, weights =  ~ weights_Epanechnikov_CCT) 
+model_simple_Kernels_CCT <- svyglm(Vax_within_90  ~ Letter_received +  bs(age_formula_influencer ,knots = 49.5, degree = 1),design = model_simple_Kernels_design_CCT, family =binomial(link='logit'))
+
+
+or_main_model_no_interaction_CCT <- logistic.display(model_simple_Kernels_CCT)
+or_main_model_no_interaction_CCT <- or_main_model_no_interaction_CCT$table[1,1]
+
+
+results_logreg_epanechnikov_CCT <- logistic.display(model_simple_Kernels_CCT)
+OR_epanechnikov_CCT <- results_logreg_epanechnikov_CCT$table[1,1]
+CI_low_epanechnikov_CCT <- results_logreg_epanechnikov_CCT$table[1,2]
+CI__high_epanechnikov_CCT<- results_logreg_epanechnikov_CCT$table[1,3]
+pvalue_epanechnikov_CCT <- results_logreg_epanechnikov_CCT$table[1,4]
+
+
+
+
+wald_test_covariates_kernels_CCT <- coeftest(model_simple_Kernels_CCT, vcov = vcovHC)
+
+
+p_value_wald_kernels_CCT <- wald_test_covariates_kernels_CCT[2,4]
+
+
+library(broom)
+library(lmtest)
+model_for_robust_CTT_rbst  <- broom::tidy(coeftest(model_simple_Kernels_CCT, vcov = vcovHC), conf.int = TRUE)
+CI_low_epanechnikov_CCT_rbst <- exp(model_for_robust_CTT_rbst$conf.low)[2]
+CI__high_epanechnikov_CCT_rbst <- exp(model_for_robust_CTT_rbst$conf.high)[2]
+
+
+
+number_obs_logreg_CCT <- as.numeric((nobs(model_simple_Kernels_CCT)))
+
+
+```
+
+#### IK weights
+
+
+Code for IK-weight log reg model:
+```{r logreg-kerne-IKl, warning = FALSE}
+
+model_simple_Kernels_design <- svydesign(id = ~ 1, data = main_data_tbl_logit, weights =  ~ weights_4_model) 
+model_simple_Kernels <- svyglm(Vax_within_90  ~ Letter_received +  bs(age_formula_influencer ,knots = 49.5, degree = 1),design = model_simple_Kernels_design, family =binomial(link='logit'))
+
+logistic.display(model_simple_Kernels)
+or_main_model_no_interaction <- logistic.display(model_simple_Kernels)
+or_main_model_no_interaction <- or_main_model_no_interaction$table[1,1]
+
+
+results_logreg_epanechnikov <- logistic.display(model_simple_Kernels)
+OR_epanechnikov <- results_logreg_epanechnikov$table[1,1]
+CI_low_epanechnikov <- results_logreg_epanechnikov$table[1,2]
+CI__high_epanechnikov<- results_logreg_epanechnikov$table[1,3]
+pvalue_epanechnikov <- results_logreg_epanechnikov$table[1,4]
+
+
+
+
+wald_test_covariates_kernels <- coeftest(model_simple_Kernels, vcov = vcovHC)
+
+
+p_value_wald_kernels <- wald_test_covariates_kernels[2,4]
+
+
+
+library(broom)
+library(lmtest)
+model_for_robust_rbst  <- broom::tidy(coeftest(model_simple_Kernels, vcov = vcovHC), conf.int = TRUE)
+CI_low_epanechnikov_rbst <- exp(model_for_robust_rbst$conf.low)[2]
+CI__high_epanechnikov_rbst <- exp(model_for_robust_rbst$conf.high)[2]
+
+
+
+number_obs_logreg <- as.numeric((nobs(model_simple_Kernels)))
+
+
+```
+
+
+
+#### Bandwidth + 1
+Increase the bandwidth found from cross validation by 1. Code:
+```{r logreg-kernel-band-plus-1 , warning = FALSE}
+
+optimal_bandwidth_plus <- optimal_bandwidth+1
+
+
+Epanechnikov_kernel_plus <- function(x, xi = 49.5, bandwidth = optimal_bandwidth_plus ) {
+  u <- abs((x-xi)/bandwidth)
+  return(ifelse(u <= 1, 3/4 * (1-u^2), 0))
+}
+
+weights_Epanechnikov_plus <- Epanechnikov_kernel_plus(main_data_tbl_logit$age_formula_influencer)
+
+model_simple_Kernels_design_plus <- svydesign(id = ~ 1, data = main_data_tbl_logit, weights =  ~ weights_Epanechnikov_plus) 
+model_simple_Kernels_plus <- svyglm(Vax_within_90  ~ Letter_received +  bs(age_formula_influencer ,knots = 49.5, degree = 1),design = model_simple_Kernels_design_plus, family =binomial(link='logit'))
+
+
+results_logreg_epanechnikov_plus1 <- logistic.display(model_simple_Kernels_plus)
+OR_epanechnikov_plus1 <- results_logreg_epanechnikov_plus1$table[1,1]
+CI_low_epanechnikov_plus1 <- results_logreg_epanechnikov_plus1$table[1,2]
+CI__high_epanechnikov_plus1<- results_logreg_epanechnikov_plus1$table[1,3]
+pvalue_epanechnikov_plus1 <- results_logreg_epanechnikov_plus1$table[1,4]
+
+
+
+
+
+wald_test_covariates_kernels_plus <- coeftest(model_simple_Kernels_plus, vcov = vcovHC)
+
+
+p_value_wald_kernels_plus <- wald_test_covariates_kernels_plus[2,4]
+
+
+library(broom)
+library(lmtest)
+model_for_robust_plus_rbst  <- broom::tidy(coeftest(model_simple_Kernels_plus, vcov = vcovHC), conf.int = TRUE)
+CI_low_epanechnikov_plus1_rbst <- exp(model_for_robust_plus_rbst$conf.low)[2]
+CI__high_epanechnikov_plus1_rbst <- exp(model_for_robust_plus_rbst$conf.high)[2]
+
+
+
+number_obs_plus <- (nobs(model_simple_Kernels_plus))
+
+
+
+```
+
+
+#### Bandwidth + 2
+
+Increase the bandwidth found from cross validation by 2. Code:
+```{r logreg-kernel-band-plus-2, warning = FALSE }
+
+
+
+optimal_bandwidth_plus2 <- optimal_bandwidth+2
+
+
+Epanechnikov_kernel_plus2 <- function(x, xi = 49.5, bandwidth = optimal_bandwidth_plus2 ) {
+  u <- abs((x-xi)/bandwidth)
+  return(ifelse(u <= 1, 3/4 * (1-u^2), 0))
+}
+
+weights_Epanechnikov_plus2 <- Epanechnikov_kernel_plus2(main_data_tbl_logit$age_formula_influencer)
+
+model_simple_Kernels_design_plus2 <- svydesign(id = ~ 1, data = main_data_tbl_logit, weights =  ~ weights_Epanechnikov_plus2) 
+model_simple_Kernels_plus2 <- svyglm(Vax_within_90  ~ Letter_received +  bs(age_formula_influencer ,knots = 49.5, degree = 1),design = model_simple_Kernels_design_plus2, family =binomial(link='logit'))
+
+results_logreg_epanechnikov_plus2 <- logistic.display(model_simple_Kernels_plus2)
+OR_epanechnikov_plus2 <- results_logreg_epanechnikov_plus2$table[1,1]
+CI_low_epanechnikov_plus2 <- results_logreg_epanechnikov_plus2$table[1,2]
+CI__high_epanechnikov_plus2<- results_logreg_epanechnikov_plus2$table[1,3]
+pvalue_epanechnikov_plus2 <- results_logreg_epanechnikov_plus2$table[1,4]
+
+
+
+
+wald_test_covariates_kernels_plus2 <- coeftest(model_simple_Kernels_plus2, vcov = vcovHC)
+
+
+p_value_wald_kernels_plus2 <- wald_test_covariates_kernels_plus2[2,4]
+
+
+library(broom)
+library(lmtest)
+model_for_robust_plus2_rbst  <- broom::tidy(coeftest(model_simple_Kernels_plus2, vcov = vcovHC), conf.int = TRUE)
+CI_low_epanechnikov_plus2_rbst <- exp(model_for_robust_plus2_rbst$conf.low)[2]
+CI__high_epanechnikov_plus2_rbst <- exp(model_for_robust_plus2_rbst$conf.high)[2]
+
+
+
+
+
+number_obs_plus2 <- (nobs(model_simple_Kernels_plus2))
+
+
+
+
+```
+
+
+#### Bandwidth - 1
+Decrease the bandwidth found from cross validation by 1
+
+```{r logreg-kernel-band-minus-1 , warning = FALSE}
+
+
+optimal_bandwidth_minus <- optimal_bandwidth-1
+
+
+
+
+Epanechnikov_kernel_minus <- function(x, xi = 49.5, bandwidth = optimal_bandwidth_minus ) {
+  u <- abs((x-xi)/bandwidth)
+  return(ifelse(u <= 1, 3/4 * (1-u^2), 0))
+}
+
+
+weights_Epanechnikov_minus <- Epanechnikov_kernel_minus(main_data_tbl_logit$age_formula_influencer)
+
+
+model_simple_Kernels_design_minus <- svydesign(id = ~ 1, data = main_data_tbl_logit, weights =  ~ weights_Epanechnikov_minus) 
+model_simple_Kernels_minus <- svyglm(Vax_within_90  ~ Letter_received +  bs(age_formula_influencer ,knots = 49.5, degree = 1),design = model_simple_Kernels_design_minus, family =binomial(link='logit'))
+
+
+results_logreg_epanechnikov_minus1 <- logistic.display(model_simple_Kernels_minus)
+OR_epanechnikov_minus1 <- results_logreg_epanechnikov_minus1$table[1,1]
+CI_low_epanechnikov_minus1 <- results_logreg_epanechnikov_minus1$table[1,2]
+CI__high_epanechnikov_minus1<- results_logreg_epanechnikov_minus1$table[1,3]
+pvalue_epanechnikov_minus1 <- results_logreg_epanechnikov_minus1$table[1,4]
+
+
+
+wald_test_covariates_kernels_minus <- coeftest(model_simple_Kernels_minus, vcov = vcovHC)
+
+
+p_value_wald_kernels_minus <- wald_test_covariates_kernels_minus[2,4]
+
+
+
+model_for_robust_minus <- broom::tidy(coeftest(model_simple_Kernels_minus, vcov = vcovHC), conf.int = TRUE)
+CI_low_epanechnikov_minus1_rbst <- exp(model_for_robust_minus$conf.low)[2]
+CI__high_epanechnikov_minus1_rbst <- exp(model_for_robust_minus$conf.high)[2]
+
+
+
+
+number_obs_minus <- (nobs(model_simple_Kernels_minus))
+
+
+
+results_table_Bandwidth <- data.frame(
+  Model = c('Bndw+1','Bndw+2', 'Bndw-1'),
+  OR = c(OR_epanechnikov_plus1,OR_epanechnikov_plus2, OR_epanechnikov_minus1),
+  CI_L = c(CI_low_epanechnikov_plus1_rbst,CI_low_epanechnikov_plus2_rbst, CI_low_epanechnikov_minus1_rbst),
+  CI_H = c(CI__high_epanechnikov_plus1_rbst,CI__high_epanechnikov_plus2_rbst, CI__high_epanechnikov_minus1_rbst),
+  P = c(pvalue_epanechnikov_plus1,pvalue_epanechnikov_plus2, pvalue_epanechnikov_minus1),
+  P_Robust = c(p_value_wald_kernels_plus,p_value_wald_kernels_plus2,p_value_wald_kernels_minus ),
+  P_intrctn = c('','', ''),
+  nm_obs = c(number_obs_plus,number_obs_plus2, number_obs_minus),
+  bandwidth = c(optimal_bandwidth_plus,optimal_bandwidth_plus2,optimal_bandwidth_minus)
+  
+)
+
+
+
+
+
+```
+
+
+
+#### Gaussian distribution
+
+Code for Gaussian-based log reg:
+```{r logreg-kernel-Gaussian, warning = FALSE }
+
+model_simple_Kernels_design_Gaussian <- svydesign(id = ~ 1, data = main_data_tbl_logit, weights =  ~ weights_Gaussian) 
+model_simple_Kernels_Gaussian <- svyglm(Vax_within_90  ~ Letter_received +  bs(age_formula_influencer ,knots = 49.5, degree = 1),
+                                        design = model_simple_Kernels_design_Gaussian, family =binomial(link='logit'))
+
+
+results_logreg_gaussian <- logistic.display(model_simple_Kernels_Gaussian)
+
+OR_gaussian <- results_logreg_gaussian$table[1,1]
+CI_low_gaussian <- results_logreg_gaussian$table[1,2]
+CI__high_gaussian<- results_logreg_gaussian$table[1,3]
+pvalue_gaussian <- results_logreg_gaussian$table[1,4]
+
+
+
+
+wald_test_covariates_kernels_gaussian <- coeftest(model_simple_Kernels_Gaussian, vcov = vcovHC)
+
+
+p_value_wald_kernels_gaussian <- wald_test_covariates_kernels_gaussian[2,4]
+
+
+
+
+library(broom)
+library(lmtest)
+model_for_robust_Gaussian <- broom::tidy(coeftest(model_simple_Kernels_Gaussian, vcov = vcovHC), conf.int = TRUE)
+CI_low_gaussian_rbst <- exp(model_for_robust_Gaussian$conf.low)[2]
+CI__high_gaussian_rbst <- exp(model_for_robust_Gaussian$conf.high)[2]
+
+
+
+number_obs_logreg_gaussian <- as.numeric((nobs(model_simple_Kernels_Gaussian)))
+
+
+
+
+results_table_Simple_Log <- data.frame(
+  Model = c('Simple','Gaussian_IK','Epanechnikov_CTT','Epanechnikov_IK'),
+  OR = c(OR_simple,OR_gaussian,OR_epanechnikov_CCT, OR_epanechnikov),
+  CI_L = c(CI_low_simple_rbst,CI_low_gaussian_rbst,CI_low_epanechnikov_CCT_rbst, CI_low_epanechnikov_rbst),
+  CI_H = c(CI__high_simple_rbst,CI__high_gaussian_rbst, CI__high_epanechnikov_CCT_rbst, CI__high_epanechnikov_rbst),
+  P = c(pvalue_simple,pvalue_gaussian,pvalue_epanechnikov_CCT, pvalue_epanechnikov),
+  P_Robust = c(p_value_wald,p_value_wald_kernels_gaussian, p_value_wald_kernels_CCT, p_value_wald_kernels),
+  P_intrctn = c('','','',''),
+  nm_obs = c(number_obs_simple,number_obs_logreg_gaussian,number_obs_logreg_CCT, number_obs_logreg),
+  bandwidth = c(NA,selected_bandwidth_imbens,selected_bandwidth_Calonico, selected_bandwidth_imbens)
+)
+
+results_table_Simple_Log <- results_table_Simple_Log[c(1,3,4,2),]
+
+
+
+```
+
+
+
+
+### Education (LogReg)
+Code for log reg with education intercation:
+```{r discontinuity-LG-Education, warning = FALSE}
+
+
+main_data_tbl_logit <- main_data_tbl_logit %>% 
+  mutate(Education_simplified = case_when(
+    Education == 'University' ~ 'University',
+    Education == 'Primary School' ~ 'Primary',
+    Education == 'Gymnasium' ~ 'Gymnasium',
+    
+    TRUE ~ NA
+  )) %>% 
+  mutate_at(c('Education_simplified'), as.factor)
+
+
+
+
+main_data_tbl_logit$Education_simplified <- factor(main_data_tbl_logit$Education_simplified,
+                                                   ordered = F,
+                                                   levels = c('Primary', 'Gymnasium', 'University'))
+
+
+model_simple_Kernels_Education_design <- svydesign(id = ~ 1, data = main_data_tbl_logit %>% 
+                                                     mutate(Education_simplified = factor(Education_simplified, levels = c('University','Gymnasium','Primary'))),
+                                                   weights =  ~ weights_4_model) 
+model_simple_Kernels_Education <- svyglm(Vax_within_90  ~ Letter_received +  bs(age_formula_influencer ,knots = 49.5, degree = 1)+ Education_simplified + Education_simplified:Letter_received,
+                                         design = model_simple_Kernels_Education_design, family =binomial(link='logit'))
+
+
+
+results_logreg_education <- logistic.display(model_simple_Kernels_Education)
+
+OR_education_main <- results_logreg_education$table[1,1]
+CI_low_education_main <- results_logreg_education$table[1,2]
+CI_high_education_main <- results_logreg_education$table[1,3]
+pvalue_education_main <- results_logreg_education$table[1,4]
+
+
+
+wald_test_covariates_kernels_inter_education <- coeftest(model_simple_Kernels_Education, vcov = vcovHC)
+
+p_value_wald_kernels_inter_education_Uni <- wald_test_covariates_kernels_inter_education[2,'Pr(>|z|)']
+
+
+
+model_for_robust_education <- broom::tidy(coeftest(model_simple_Kernels_Education, vcov = vcovHC), conf.int = TRUE)
+CI_low_education_main_rbst <- exp(model_for_robust_education$conf.low)[2]
+CI_high_education_main_rbst <- exp(model_for_robust_education$conf.high)[2]
+OR_robust_NOT_FOR_USE_JUST_FOR_COMPARISON_educ <- exp(model_for_robust_education$estimate)[2]
+
+
+
+
+
+
+
+
+number_obs_inter_education_uni <- (nobs(model_simple_Kernels_Education))
+
+
+model_interaction_Education_for_Robust_uni <- car::linearHypothesis(model_simple_Kernels_Education,
+                                                                    c(
+                                                                      'Letter_received:Education_simplifiedGymnasium',
+                                                                      'Letter_received:Education_simplifiedPrimary'),
+                                                                    cluster=NULL,
+                                                                    
+                                                                    vcov = vcovHC(model_simple_Kernels_Education,type = 'HC3'))
+
+
+pvalue_interaction_Robust_education_uni <- model_interaction_Education_for_Robust_uni[2,'Pr(>Chisq)']
+
+
+
+
+model_simple_Kernels_Education_Gymn_design <- svydesign(id = ~ 1, data = main_data_tbl_logit %>% 
+                                                          mutate(Education_simplified = factor(Education_simplified, levels = c('Gymnasium','University','Primary'))),
+                                                        weights =  ~ weights_4_model) 
+model_simple_Kernels_Education_Gymn <- svyglm(Vax_within_90  ~ Letter_received +  bs(age_formula_influencer ,knots = 49.5, degree = 1)+ Education_simplified + Education_simplified:Letter_received,
+                                              design = model_simple_Kernels_Education_Gymn_design, family =binomial(link='logit'))
+
+
+results_logreg_Education_Gymn <- logistic.display(model_simple_Kernels_Education_Gymn)
+
+OR_Education_Gymn <- results_logreg_Education_Gymn$table[1,1]
+CI_low_Education_Gymn <- results_logreg_Education_Gymn$table[1,2]
+CI__high_Education_Gymn <- results_logreg_Education_Gymn$table[1,3]
+pvalue_Education_Gymn <- results_logreg_Education_Gymn$table[1,4]
+
+wald_test_covariates_kernels_inter_country_Gymn <- coeftest(model_simple_Kernels_Education_Gymn, vcov = vcovHC)
+
+p_value_wald_kernels_inter_country_Gymn <- wald_test_covariates_kernels_inter_country_Gymn[2,4]
+
+
+
+model_for_robust_education_gymn <- broom::tidy(coeftest(model_simple_Kernels_Education_Gymn, vcov = vcovHC), conf.int = TRUE)
+CI_low_Education_Gymn_rbst <- exp(model_for_robust_education_gymn$conf.low)[2]
+CI__high_Education_Gymn_rbst <- exp(model_for_robust_education_gymn$conf.high)[2]
+
+
+
+
+
+number_obs_inter_education_uni_Gymn <- (nobs(model_simple_Kernels_Education_Gymn))
+
+
+
+
+model_interaction_education_gymn <- car::linearHypothesis(model_simple_Kernels_Education_Gymn,
+                                                          c(
+                                                            'Letter_received:Education_simplifiedPrimary',
+                                                            'Letter_received:Education_simplifiedUniversity'),
+                                                          cluster=NULL,
+                                                          
+                                                          vcov = vcovHC(model_simple_Kernels_Education_Gymn,type = 'HC3'))
+
+pvalue_interaction_Robust_education_gymn <- model_interaction_education_gymn[2,'Pr(>Chisq)']
+
+
+
+
+
+
+model_simple_Kernels_Education_Primary_design <- svydesign(id = ~ 1, data = main_data_tbl_logit %>% 
+                                                             mutate(Education_simplified = factor(Education_simplified, levels = c('Primary','University','Gymnasium'))),
+                                                           weights =  ~ weights_4_model) 
+model_simple_Kernels_Education_Primary <- svyglm(Vax_within_90  ~ Letter_received +  bs(age_formula_influencer ,knots = 49.5, degree = 1)+ Education_simplified + Education_simplified:Letter_received,
+                                                 design = model_simple_Kernels_Education_Primary_design, family =binomial(link='logit'))
+
+
+
+
+results_logreg_Education_Primary <- logistic.display(model_simple_Kernels_Education_Primary)
+
+OR_Education_Primary <- results_logreg_Education_Primary$table[1,1]
+CI_low_Education_Primary <- results_logreg_Education_Primary$table[1,2]
+CI__high_Education_Primary <- results_logreg_Education_Primary$table[1,3]
+pvalue_Education_Primary <- results_logreg_Education_Primary$table[1,4]
+
+wald_test_covariates_kernels_inter_country_Primary <- coeftest(model_simple_Kernels_Education_Primary, vcov = vcovHC)
+exp(0.81)
+
+p_value_wald_kernels_inter_country_Primary <- wald_test_covariates_kernels_inter_country_Primary[2,4]
+
+
+model_for_robust_education_prim <- broom::tidy(coeftest(model_simple_Kernels_Education_Primary, vcov = vcovHC), conf.int = TRUE)
+CI_low_Education_Primary_rbst <- exp(model_for_robust_education_prim$conf.low)[2]
+CI__high_Education_Primary_rbst <- exp(model_for_robust_education_prim$conf.high)[2]
+
+
+
+
+number_obs_inter_Education_prim <- 
+  (nobs(model_simple_Kernels_Education_Primary))
+
+
+
+
+model_interaction_education_primary <- car::linearHypothesis(model_simple_Kernels_Education_Primary,
+                                                             c(
+                                                               'Letter_received:Education_simplifiedGymnasium',
+                                                               'Letter_received:Education_simplifiedUniversity'),
+                                                             cluster=NULL,
+                                                             
+                                                             vcov = vcovHC(model_simple_Kernels_Education_Primary,type = 'HC3'))
+
+pvalue_interaction_Robust_education_primary <- model_interaction_education_primary[2,'Pr(>Chisq)']
+
+
+
+
+
+
+
+
+
+
+results_table_Education <- data.frame(
+  Model = c('Edu_Uni','Edu_Gymns','Edu_Primr'),
+  OR = c(OR_education_main,OR_Education_Gymn, OR_Education_Primary),
+  CI_L = c(CI_low_education_main_rbst,CI_low_Education_Gymn_rbst, CI_low_Education_Primary_rbst),
+  CI_H = c(CI_high_education_main_rbst,CI__high_Education_Gymn_rbst, CI__high_Education_Primary_rbst),
+  P = c(pvalue_education_main,pvalue_Education_Gymn, pvalue_Education_Primary),
+  P_Robust = c(p_value_wald_kernels_inter_education_Uni,p_value_wald_kernels_inter_country_Gymn, p_value_wald_kernels_inter_country_Primary),
+  P_intrctn = c(pvalue_interaction_Robust_education_uni,pvalue_interaction_Robust_education_gymn,pvalue_interaction_Robust_education_primary),
+  nm_obs = c(number_obs_inter_education_uni,number_obs_inter_education_uni_Gymn,number_obs_inter_Education_prim),
+  bandwidth = c(optimal_bandwidth,optimal_bandwidth, optimal_bandwidth)
+  
+)
+
+
+```
+
+
+
+
+
+
+#### Outcome Plot - 90
+
+```{r outcome-plot-90-education, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+
+
+main_data_tbl_sum_90_Education <- main_data_tbl %>% 
+  filter(Vax_within_90 == 'Yes') %>% 
+  group_by(Letter_received, Birth_year_influencer, Birth_month_influencer, BirthYM_Cat_influencer, Education) %>% 
+  summarize(pop_vaxed = n()) %>% 
+  ungroup() 
+
+pop_per_month_cat_education$BirthYM_Cat_influencer <- as.character(pop_per_month_cat_education$BirthYM_Cat_influencer)
+main_data_tbl_sum_90_Education$BirthYM_Cat_influencer <- as.character(main_data_tbl_sum_90_Education$BirthYM_Cat_influencer)
+
+
+main_data_tbl_sum_90_Education <- main_data_tbl_sum_90_Education %>% 
+  left_join(pop_per_month_cat_education, by =c('Education','BirthYM_Cat_influencer'))
+
+main_data_tbl_sum_90_Education$prop_vaxed <- (main_data_tbl_sum_90_Education$pop_vaxed/main_data_tbl_sum_90_Education$population)
+
+
+main_data_tbl_sum_90_Education <- main_data_tbl_sum_90_Education %>% 
+  mutate( age_formula_influencer = (2021-Birth_year_influencer)+(6-Birth_month_influencer)/12)# %>% 
+
+
+main_data_tbl_sum_90_Education$BirthYM_Cat_influencer <- factor(main_data_tbl_sum_90_Education$BirthYM_Cat_influencer)#, 
+
+
+main_data_tbl_sum_90_Education <- main_data_tbl_sum_90_Education %>% 
+  dplyr::filter(!is.na(Education))
+
+
+
+
+main_data_tbl_sum_90_Education$Education <- factor(
+  main_data_tbl_sum_90_Education$Education, ordered = T, levels = c('Primary School', 'Gymnasium', 'University'))
+
+
+
+
+ggplot(main_data_tbl_sum_90_Education, aes(x = age_formula_influencer,
+                                           y = prop_vaxed, 
+                                           fill = Letter_received,
+                                           color = Letter_received)) +
+  geom_vline(xintercept = 49.5) +
+  
+  geom_point(size = 0.8, alpha = 0.3) +
+  
+  geom_smooth(data = filter(main_data_tbl_sum_90_Education, Birth_year_influencer <= 1971), method = "lm") +
+  geom_smooth(data = filter(main_data_tbl_sum_90_Education, Birth_year_influencer > 1971), method = "lm") +
+  
+  
+  scale_y_continuous(labels = scales::percent)+
+  
+  scale_color_manual(values = c('dodgerblue3','red3'),
+                     labels=c('Letter notification', 'Self-booking')) +   # '#26547c','#ef476f'    440155FF #481568FF
+  scale_fill_manual(values = c('dodgerblue1','red1'),
+                    labels=c('Letter notification', 'Self-booking')) +   # '#26547c','#ef476f'    440155FF #481568FF
+  
+  labs(x = "Partner's age (years)"
+       , y = "Proportion vaccinated within 90 days of the opening"
+       , color = "Intervention:", title = paste0(plot_title, '- Education'),
+       fill = "Intervention:") + 
+  theme_classic()+
+  facet_wrap(Education ~. )
+
+
+
+```
+
+
+### Salary (LogReg)
+
+Code for log reg with salary intercation:
+```{r discontinuity-LG-Salary , warning = FALSE}
+
+
+
+
+
+model_simple_Kernels_Salary_design <- svydesign(id = ~ 1, data = main_data_tbl_logit,
+                                                weights =  ~ weights_4_model) 
+model_simple_Kernels_Salary <- svyglm(Vax_within_90  ~ Letter_received +  bs(age_formula_influencer ,knots = 49.5, degree = 1)+ Ind_slr_cat + Ind_slr_cat:Letter_received,
+                                      design = model_simple_Kernels_Salary_design, family =binomial(link='logit'))
+
+
+results_logreg_salary <- logistic.display(model_simple_Kernels_Salary)
+
+OR_salary_main <- results_logreg_salary$table[1,1]
+CI_low_salary_main <- results_logreg_salary$table[1,2]
+CI_high_salary_main <- results_logreg_salary$table[1,3]
+pvalue_salary_main <- results_logreg_salary$table[1,4]
+
+
+wald_test_covariates_kernels_inter_Salary_main <- coeftest(model_simple_Kernels_Salary, vcov = vcovHC)
+
+
+
+p_value_wald_kernels_inter_Salary_main_robustified_High <- wald_test_covariates_kernels_inter_Salary_main[2,4]
+
+p_value_wald_kernels_inter_Salary_main_robustified_interaction <- wald_test_covariates_kernels_inter_Salary_main[6,4]
+
+
+
+model_for_robust_salary <- broom::tidy(coeftest(model_simple_Kernels_Salary, vcov = vcovHC), conf.int = TRUE)
+CI_low_salary_main_rbst <- exp(model_for_robust_salary$conf.low)[2]
+CI_high_salary_main_rbst <- exp(model_for_robust_salary$conf.high)[2]
+
+
+
+number_obs_inter_Salary_high <-  (nobs(model_simple_Kernels_Salary))
+
+
+
+
+
+model_simple_Kernels_Salary_low_design <- svydesign(id = ~ 1, data = main_data_tbl_logit %>% 
+                                                      mutate(Ind_slr_cat = fct_rev(Ind_slr_cat)),
+                                                    weights =  ~ weights_4_model) 
+model_simple_Kernels_Salary_low <- svyglm(Vax_within_90  ~ Letter_received +  bs(age_formula_influencer ,knots = 49.5, degree = 1)+ Ind_slr_cat + Ind_slr_cat:Letter_received,
+                                          design = model_simple_Kernels_Salary_low_design, family =binomial(link='logit'))
+
+
+results_logreg_Salary_low <- logistic.display(model_simple_Kernels_Salary_low)
+
+OR_Salary_low <- results_logreg_Salary_low$table[1,1]
+CI_low_Salary_low <- results_logreg_Salary_low$table[1,2]
+CI_high_Salary_low <- results_logreg_Salary_low$table[1,3]
+pvalue_Salary_low <- results_logreg_Salary_low$table[1,4]
+
+wald_test_covariates_kernels_inter_Salary_low <- coeftest(model_simple_Kernels_Salary_low, vcov = vcovHC)
+
+p_value_wald_kernels_inter_Salary_main_robustified_Low <- wald_test_covariates_kernels_inter_Salary_low[2,4]
+
+
+
+model_for_robust_salary_low <- broom::tidy(coeftest(model_simple_Kernels_Salary_low, vcov = vcovHC), conf.int = TRUE)
+CI_low_Salary_low_rbst <- exp(model_for_robust_salary_low$conf.low)[2]
+CI_high_Salary_low_rbst <- exp(model_for_robust_salary_low$conf.high)[2]
+
+
+
+
+number_obs_inter_Salary_low <- (nobs(model_simple_Kernels_Salary_low))
+
+p_value_wald_kernels_inter_Salary_Low_robustified_interaction <- wald_test_covariates_kernels_inter_Salary_low[6,4]
+
+
+
+
+results_table_Salary <- data.frame(
+  Model = c('Salr_High','Salr_Low'),
+  OR = c(OR_salary_main,OR_Salary_low),
+  CI_L = c(CI_low_salary_main_rbst,CI_low_Salary_low_rbst),
+  CI_H = c(CI_high_salary_main_rbst,CI_high_Salary_low_rbst),
+  P = c(pvalue_salary_main,pvalue_Salary_low),
+  P_Robust = c(p_value_wald_kernels_inter_Salary_main_robustified_High,p_value_wald_kernels_inter_Salary_main_robustified_Low),
+  P_intrctn = c(p_value_wald_kernels_inter_Salary_main_robustified_interaction,p_value_wald_kernels_inter_Salary_Low_robustified_interaction),
+  nm_obs = c(number_obs_inter_Salary_high,number_obs_inter_Salary_low),
+  bandwidth = c(optimal_bandwidth,optimal_bandwidth)
+  
+)
+
+
+
+```
+
+
+
+#### Outcome Plot - 90
+
+```{r outcome-plot-90-Salary, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+main_data_tbl_sum_90_Salary <- main_data_tbl %>% 
+  filter(Vax_within_90 == 'Yes') %>% 
+  group_by(Letter_received, Birth_year_influencer, Birth_month_influencer, BirthYM_Cat_influencer, Ind_slr_cat) %>% 
+  summarize(pop_vaxed = n()) %>% 
+  ungroup() 
+
+pop_per_month_cat_salary$BirthYM_Cat_influencer <- as.character(pop_per_month_cat_salary$BirthYM_Cat_influencer)
+main_data_tbl_sum_90_Salary$BirthYM_Cat_influencer <- as.character(main_data_tbl_sum_90_Salary$BirthYM_Cat_influencer)
+
+
+main_data_tbl_sum_90_Salary <- main_data_tbl_sum_90_Salary %>% 
+  left_join(pop_per_month_cat_salary, by = c('Ind_slr_cat','BirthYM_Cat_influencer'))
+
+main_data_tbl_sum_90_Salary$prop_vaxed <- (main_data_tbl_sum_90_Salary$pop_vaxed/main_data_tbl_sum_90_Salary$population)
+
+
+main_data_tbl_sum_90_Salary <- main_data_tbl_sum_90_Salary %>% 
+  mutate( age_formula_influencer = (2021-Birth_year_influencer)+(6-Birth_month_influencer)/12)# %>% 
+
+
+main_data_tbl_sum_90_Salary$BirthYM_Cat_influencer <- factor(main_data_tbl_sum_90_Salary$BirthYM_Cat_influencer)#, 
+
+
+main_data_tbl_sum_90_Salary <- main_data_tbl_sum_90_Salary %>% 
+  dplyr::filter(!is.na(Ind_slr_cat))
+
+
+
+main_data_tbl_sum_90_Salary$Ind_slr_cat <- factor(
+  main_data_tbl_sum_90_Salary$Ind_slr_cat, ordered = T, levels = c('Low', 'High'))
+
+
+
+
+ggplot(main_data_tbl_sum_90_Salary, aes(x = age_formula_influencer,
+                                        y = prop_vaxed, 
+                                        fill = Letter_received,
+                                        color = Letter_received)) +
+  geom_vline(xintercept = 49.5) +
+  
+  geom_point(size = 0.8, alpha = 0.3) +
+  
+  
+  geom_smooth(data = filter(main_data_tbl_sum_90_Salary, Birth_year_influencer <= 1971), method = "lm") +
+  geom_smooth(data = filter(main_data_tbl_sum_90_Salary, Birth_year_influencer > 1971), method = "lm") +
+  
+  
+  scale_y_continuous(labels = scales::percent)+
+  
+  scale_color_manual(values = c('dodgerblue3','red3'),
+                     labels=c('Letter notification', 'Self-booking')) +   # '#26547c','#ef476f'    440155FF #481568FF
+  scale_fill_manual(values = c('dodgerblue1','red1'),
+                    labels=c('Letter notification', 'Self-booking')) +   # '#26547c','#ef476f'    440155FF #481568FF
+  
+  labs(x = "Partner's age (years)"
+       , y = "Proportion vaccinated within 90 days of the opening"
+       , color = "Intervention:", title = paste0(plot_title, '- Salary'),
+       fill = "Intervention:") + 
+  theme_classic()+
+  facet_wrap(Ind_slr_cat ~.)
+
+
+
+```
+
+### sex (LogReg)
+
+Code for log reg with sex intercation:
+```{r discontinuity-LG-sex , warning = FALSE}
+
+
+
+
+
+
+model_simple_Kernels_sex_design <- svydesign(id = ~ 1, data = main_data_tbl_logit,
+                                             weights =  ~ weights_4_model) 
+model_simple_Kernels_sex <- svyglm(Vax_within_90  ~ Letter_received +  bs(age_formula_influencer ,knots = 49.5, degree = 1)+ sex + sex:Letter_received,
+                                   design = model_simple_Kernels_sex_design, family =binomial(link='logit'))
+
+
+results_logreg_sex <- logistic.display(model_simple_Kernels_sex)
+
+OR_sex_main <- results_logreg_sex$table[1,1]
+CI_low_sex_main <- results_logreg_sex$table[1,2]
+CI_high_sex_main <- results_logreg_sex$table[1,3]
+pvalue_sex_main <- results_logreg_sex$table[1,4]
+
+
+wald_test_covariates_kernels_inter_sex_main <- coeftest(model_simple_Kernels_sex, vcov = vcovHC)
+
+number_obs_inter_sex_female <-  (nobs(model_simple_Kernels_sex))
+
+p_value_wald_kernels_inter_sex_main_robustified_Female <- wald_test_covariates_kernels_inter_sex_main[2,4]
+
+
+
+
+
+model_for_robust_sex <- broom::tidy(coeftest(model_simple_Kernels_sex, vcov = vcovHC), conf.int = TRUE)
+CI_low_sex_main_rbst <- exp(model_for_robust_sex$conf.low)[2]
+CI_high_sex_main_rbst <- exp(model_for_robust_sex$conf.high)[2]
+
+
+
+
+
+p_value_wald_kernels_inter_sex_main_robustified_interaction <- wald_test_covariates_kernels_inter_sex_main[6,4]
+
+
+
+
+
+
+model_simple_Kernels_sex_male_design <- svydesign(id = ~ 1, data = main_data_tbl_logit %>% 
+                                                    mutate(sex = fct_rev(sex)),
+                                                  weights =  ~ weights_4_model) 
+model_simple_Kernels_sex_male <- svyglm(Vax_within_90  ~ Letter_received +  bs(age_formula_influencer ,knots = 49.5, degree = 1)+ sex + sex:Letter_received,
+                                        design = model_simple_Kernels_sex_male_design, family =binomial(link='logit'))
+
+
+
+results_logreg_sex_male <- logistic.display(model_simple_Kernels_sex_male)
+
+OR_sex_male <- results_logreg_sex_male$table[1,1]
+CI_low_sex_male <- results_logreg_sex_male$table[1,2]
+CI__high_sex_male <- results_logreg_sex_male$table[1,3]
+pvalue_sex_male <- results_logreg_sex_male$table[1,4]
+
+wald_test_covariates_kernels_inter_sex_male <- coeftest(model_simple_Kernels_sex_male, vcov = vcovHC)
+
+p_value_wald_kernels_inter_sex_main_robustified_Male <- wald_test_covariates_kernels_inter_sex_male[2,4]
+
+
+
+model_for_robust_sex_male <- broom::tidy(coeftest(model_simple_Kernels_sex_male, vcov = vcovHC), conf.int = TRUE)
+CI_low_sex_male_rbst <- exp(model_for_robust_sex_male$conf.low)[2]
+CI__high_sex_male_rbst <- exp(model_for_robust_sex_male$conf.high)[2]
+
+
+
+
+number_obs_inter_sex_male <-  (nobs(model_simple_Kernels_sex_male))
+
+p_value_wald_kernels_inter_sex_MALE__robustified_interaction <- wald_test_covariates_kernels_inter_sex_male[6,4]
+
+
+
+
+results_table_sex <- data.frame(
+  Model = c('Female','Male'),
+  OR = c(OR_sex_main,OR_sex_male),
+  CI_L = c(CI_low_sex_main_rbst,CI_low_sex_male_rbst),
+  CI_H = c(CI_high_sex_main_rbst,CI__high_sex_male_rbst),
+  P = c(pvalue_sex_main,pvalue_sex_male),
+  P_Robust = c(p_value_wald_kernels_inter_sex_main_robustified_Female,p_value_wald_kernels_inter_sex_main_robustified_Male),
+  P_intrctn = c(p_value_wald_kernels_inter_sex_main_robustified_interaction,p_value_wald_kernels_inter_sex_MALE__robustified_interaction),
+  nm_obs = c(number_obs_inter_sex_female,number_obs_inter_sex_male),
+  bandwidth = c(optimal_bandwidth,optimal_bandwidth)
+  
+)
+
+
+```
+
+
+
+
+
+
+
+#### Outcome Plot - 90 
+
+```{r outcome-plot-90-sex, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+main_data_tbl_sum_90_sex <- main_data_tbl %>% 
+  filter(Vax_within_90 == 'Yes') %>% 
+  group_by(Letter_received, Birth_year_influencer, Birth_month_influencer, BirthYM_Cat_influencer, sex) %>% 
+  summarize(pop_vaxed = n()) %>% 
+  ungroup() 
+
+pop_per_month_cat_sex$BirthYM_Cat_influencer <- as.character(pop_per_month_cat_sex$BirthYM_Cat_influencer)
+main_data_tbl_sum_90_sex$BirthYM_Cat_influencer <- as.character(main_data_tbl_sum_90_sex$BirthYM_Cat_influencer)
+
+
+main_data_tbl_sum_90_sex <- main_data_tbl_sum_90_sex %>% 
+  left_join(pop_per_month_cat_sex, by = c('sex','BirthYM_Cat_influencer'))
+
+main_data_tbl_sum_90_sex$prop_vaxed <- (main_data_tbl_sum_90_sex$pop_vaxed/main_data_tbl_sum_90_sex$population)
+
+
+main_data_tbl_sum_90_sex <- main_data_tbl_sum_90_sex %>% 
+  mutate( age_formula_influencer = (2021-Birth_year_influencer)+(6-Birth_month_influencer)/12)# %>% 
+
+
+main_data_tbl_sum_90_sex$BirthYM_Cat_influencer <- factor(main_data_tbl_sum_90_sex$BirthYM_Cat_influencer)#, 
+
+
+main_data_tbl_sum_90_sex <- main_data_tbl_sum_90_sex %>% 
+  dplyr::filter(!is.na(sex))
+
+
+
+
+main_data_tbl_sum_90_sex$sex <- factor(
+  main_data_tbl_sum_90_sex$sex, ordered = T, levels = c('Female', 'Male'))
+
+
+
+
+ggplot(main_data_tbl_sum_90_sex, aes(x = age_formula_influencer,
+                                     y = prop_vaxed, 
+                                     fill = Letter_received,
+                                     color = Letter_received)) +
+  geom_vline(xintercept = 49.5) +
+  
+  geom_point(size = 0.8, alpha = 0.3) +
+  
+  
+  
+  
+  
+  geom_smooth(data = filter(main_data_tbl_sum_90_sex, Birth_year_influencer <= 1971), method = "lm") +
+  geom_smooth(data = filter(main_data_tbl_sum_90_sex, Birth_year_influencer > 1971), method = "lm") +
+  
+  
+  scale_y_continuous(labels = scales::percent)+
+  
+  scale_color_manual(values = c('dodgerblue3','red3'),
+                     labels=c('Letter notification', 'Self-booking')) +   # '#26547c','#ef476f'    440155FF #481568FF
+  scale_fill_manual(values = c('dodgerblue1','red1'),
+                    labels=c('Letter notification', 'Self-booking')) +   # '#26547c','#ef476f'    440155FF #481568FF
+  
+  labs(x = "Partner's age (years)"
+       , y = "Proportion vaccinated within 90 days of the opening"
+       , color = "Intervention:", title = paste0(plot_title, '- Sex'),
+       fill = "Intervention:") + 
+  theme_classic()+
+  facet_wrap(sex ~.)
+
+
+
+```
+
+
+
+
+
+## Linear regression (RDRobust)
+
+
+
+
+### Simple RDRobust
+
+Code for rdrobust:
+Output for rdrobust:
+```{r rdrobust , warning = FALSE}
+
+library(rdrobust)
+library(splines)
+library(epiDisplay)
+
+
+rd_analysis <- rdrobust(y = main_data_tbl_logit$Vax_within_90,
+                        x = main_data_tbl_logit$age_formula_influencer, 
+                        c = 49.5,
+                        h = selected_bandwidth_imbens,
+                        p = 1, # 1 for linear regression
+                        kernel = 'epanechnikov')
+
+rd_analysis %>%
+  summary()
+
+coeff_main_rd <- rd_analysis$coef[3]
+se_main_rd <- rd_analysis$se[3]
+pvalue_main_rd <- rd_analysis$pv[1]
+pvalue_main_rd_robust <- rd_analysis$pv[3]
+
+CI95_low_main_rd <- rd_analysis$ci[3,1] #coeff_main_rd-se_main_rd*1.96
+CI95_high_main_rd <- rd_analysis$ci[3,2] # coeff_main_rd+se_main_rd*1.96
+
+nm_obs_rdrobust <- rd_analysis$N[1]+rd_analysis$N[2]
+selected_bndwdth_rdrob <- rd_analysis$bws[1,1]
+selected_bndwdth_Bias_Corrected_rdrob <- rd_analysis$bws[2,1]
+
+
+
+
+```
+
+
+
+### Education interaction
+
+Code for rdrobust with education intercation:
+```{r rdrobust-interaction-education , warning = FALSE}
+
+
+
+main_data_tbl_logit_Edu_Prim <- main_data_tbl_logit %>% 
+  filter(Education == 'Primary School')
+
+main_data_tbl_logit_Edu_Gymn <- main_data_tbl_logit %>% 
+  filter(Education == 'Gymnasium')
+
+main_data_tbl_logit_Edu_Uni <- main_data_tbl_logit %>% 
+  filter(Education == 'University')
+
+
+rd_analysis_edu_Prim <- rdrobust(y = main_data_tbl_logit_Edu_Prim$Vax_within_90,
+                                 x = main_data_tbl_logit_Edu_Prim$age_formula_influencer, 
+                                 c = 49.5,
+                                 h = selected_bandwidth_imbens,
+                                 p = 1, # 1 for linear regression
+                                 kernel = 'epanechnikov')
+
+
+
+rd_analysis_edu_Gymn <- rdrobust(y = main_data_tbl_logit_Edu_Gymn$Vax_within_90,
+                                 x = main_data_tbl_logit_Edu_Gymn$age_formula_influencer, 
+                                 c = 49.5,
+                                 h = selected_bandwidth_imbens,
+                                 p = 1, # 1 for linear regression
+                                 kernel = 'epanechnikov')
+
+
+rd_analysis_edu_Uni <- rdrobust(y = main_data_tbl_logit_Edu_Uni$Vax_within_90,
+                                x = main_data_tbl_logit_Edu_Uni$age_formula_influencer, 
+                                c = 49.5,
+                                h = selected_bandwidth_imbens,
+                                p = 1, # 1 for linear regression
+                                kernel = 'epanechnikov')
+
+
+
+Primary_beta <- rd_analysis_edu_Prim$coef[3]
+Primary_se <- rd_analysis_edu_Prim$se[3]
+pvalue_primary <- rd_analysis_edu_Prim$pv[1]
+CI95_low_primary <- rd_analysis_edu_Prim$ci[3,1] 
+CI95_high_primary <- rd_analysis_edu_Prim$ci[3,2] 
+
+pvalue_Primar_robust <- rd_analysis_edu_Prim$pv[3]
+nm_obs_rdrobust_Primar <- rd_analysis_edu_Prim$N[1]+rd_analysis_edu_Prim$N[2]
+selected_bndwdth_rdrob_Primar <- rd_analysis_edu_Prim$bws[1,1]
+selected_bndwdth_Bias_Corrected_rdrob_Primar <- rd_analysis_edu_Prim$bws[2,1]
+
+
+
+
+Gymnasium_beta <- rd_analysis_edu_Gymn$coef[3]
+Gymnasium_se <- rd_analysis_edu_Gymn$se[3]
+pvalue_gymnas <- rd_analysis_edu_Gymn$pv[1]
+CI95_low_gymnas <- rd_analysis_edu_Gymn$ci[3,1] 
+CI95_high_gymnas <- rd_analysis_edu_Gymn$ci[3,2] 
+
+pvalue_Gymn_robust <- rd_analysis_edu_Gymn$pv[3]
+nm_obs_rdrobust_Gymn <- rd_analysis_edu_Gymn$N[1]+rd_analysis_edu_Gymn$N[2]
+selected_bndwdth_rdrob_Gymn <- rd_analysis_edu_Gymn$bws[1,1]
+selected_bndwdth_Bias_Corrected_rdrob_Gymn <- rd_analysis_edu_Gymn$bws[2,1]
+
+
+
+University_beta <- rd_analysis_edu_Uni$coef[3]
+University_se <- rd_analysis_edu_Uni$se[3]
+pvalue_University <- rd_analysis_edu_Uni$pv[1]
+CI95_low_University <- rd_analysis_edu_Uni$ci[3,1] 
+CI95_high_University <- rd_analysis_edu_Uni$ci[3,2] 
+
+pvalue_Uni_robust <- rd_analysis_edu_Uni$pv[3]
+nm_obs_rdrobust_Uni <- rd_analysis_edu_Uni$N[1]+rd_analysis_edu_Uni$N[2]
+selected_bndwdth_rdrob_Uni <- rd_analysis_edu_Uni$bws[1,1]
+selected_bndwdth_Bias_Corrected_rdrob_Uni <- rd_analysis_edu_Uni$bws[2,1]
+
+
+
+beta_mean_edu=(Primary_beta+Gymnasium_beta+University_beta)/3
+
+chi2_education <- (((Primary_beta-beta_mean_edu)/(sqrt(Primary_se^2)))^2)+(((Gymnasium_beta-beta_mean_edu)/
+                                                                              (sqrt(Gymnasium_se^2)))^2)+(((University_beta-beta_mean_edu)/(sqrt(University_se^2)))^2)
+p_value_educ <- (1-pchisq(chi2_education, df=2))
+
+
+
+
+
+
+
+results_table_Education_rdrobust <- data.frame(
+  Model = c('Edu_Uni', 'Edu_Gymns', 'Edu_Primr'),
+  Coeff = c(University_beta, Gymnasium_beta, Primary_beta),
+  CI_L = c(CI95_low_University, CI95_low_gymnas, CI95_low_primary),
+  CI_H = c(CI95_high_University,CI95_high_gymnas, CI95_high_primary),
+  P = c(pvalue_University,pvalue_gymnas, pvalue_primary),
+  P_Robust = c(pvalue_Uni_robust,pvalue_Gymn_robust,pvalue_Primar_robust),
+  
+  P_intrctn = c(p_value_educ,p_value_educ,p_value_educ),
+  
+  nm_obs = c(nm_obs_rdrobust_Uni,nm_obs_rdrobust_Gymn, nm_obs_rdrobust_Primar),
+  bandwidth = c(selected_bndwdth_rdrob_Uni,selected_bndwdth_rdrob_Gymn,selected_bndwdth_rdrob_Primar),
+  bndw_bias_correct = c(selected_bndwdth_Bias_Corrected_rdrob_Uni,selected_bndwdth_Bias_Corrected_rdrob_Gymn, selected_bndwdth_Bias_Corrected_rdrob_Primar)
+  
+  
+)
+
+```
+
+
+
+
+
+### Salary interaction
+
+
+Code for rdrobust with salary intercation:
+```{r rdrobust-interaction-salary , warning = FALSE}
+
+
+
+main_data_tbl_logit_low_salary <- main_data_tbl_logit %>% 
+  filter(Ind_slr_cat == 'Low')
+
+
+
+main_data_tbl_logit_high_salary <- main_data_tbl_logit %>% 
+  filter(Ind_slr_cat == 'High')
+
+rd_analysis_salary_low <- rdrobust(y = main_data_tbl_logit_low_salary$Vax_within_90,
+                                   x = main_data_tbl_logit_low_salary$age_formula_influencer, 
+                                   c = 49.5,
+                                   h = selected_bandwidth_imbens,
+                                   p = 1, # 1 for linear regression
+                                   kernel = 'epanechnikov')
+
+
+
+rd_analysis_salary_high<- rdrobust(y = main_data_tbl_logit_high_salary$Vax_within_90,
+                                   x = main_data_tbl_logit_high_salary$age_formula_influencer, 
+                                   c = 49.5,
+                                   h = selected_bandwidth_imbens,
+                                   p = 1, # 1 for linear regression
+                                   kernel = 'epanechnikov')
+
+
+low_salary_beta <- rd_analysis_salary_low$coef[3]
+low_salary_se <- rd_analysis_salary_low$se[3]
+pvalue_salary_low <- rd_analysis_salary_low$pv[1]
+CI95_low_salary_low <- rd_analysis_salary_low$ci[3,1] 
+CI95_high_salary_low <- rd_analysis_salary_low$ci[3,2] 
+
+pvalue_Low_Sal_robust <- rd_analysis_salary_low$pv[3]
+nm_obs_rdrobust_Low_Sal <- rd_analysis_salary_low$N[1]+rd_analysis_salary_low$N[2]
+selected_bndwdth_rdrob_Low_Sal <- rd_analysis_salary_low$bws[1,1]
+selected_bndwdth_Bias_Corrected_rdrob_Low_Sal <- rd_analysis_salary_low$bws[2,1]
+
+
+
+high_salary_beta <- rd_analysis_salary_high$coef[3]
+high_salary_se <- rd_analysis_salary_high$se[3]
+pvalue_high_salary <- rd_analysis_salary_high$pv[1]
+CI95_low_high_salary <- rd_analysis_salary_high$ci[3,1] 
+CI95_high_high_salary <- rd_analysis_salary_high$ci[3,2] 
+
+pvalue_High_Sal_robust <- rd_analysis_salary_high$pv[3]
+nm_obs_rdrobust_High_Sal <- rd_analysis_salary_high$N[1]+rd_analysis_salary_high$N[2]
+selected_bndwdth_rdrob_High_Sal <- rd_analysis_salary_high$bws[1,1]
+selected_bndwdth_Bias_Corrected_rdrob_High_Sal <- rd_analysis_salary_high$bws[2,1]
+
+
+
+
+z_salary <- (low_salary_beta-high_salary_beta)/(sqrt(low_salary_se^2+high_salary_se^2))
+pvalue_salary_rd <- (1-pnorm(abs(z_salary)))*2
+
+
+beta_salary <- (high_salary_beta+low_salary_beta)/2
+
+
+
+
+
+results_table_Salary_rdrobust <- data.frame(
+  Model = c('Salr_High', 'Salr_Low'),
+  Coeff = c( high_salary_beta, low_salary_beta),
+  CI_L = c( CI95_low_high_salary, CI95_low_salary_low),
+  CI_H = c(CI95_high_high_salary, CI95_high_salary_low),
+  P = c(pvalue_high_salary, pvalue_salary_low),
+  P_Robust = c(pvalue_High_Sal_robust,pvalue_Low_Sal_robust),
+  
+  P_intrctn = c(pvalue_salary_rd,pvalue_salary_rd),
+  
+  nm_obs = c(nm_obs_rdrobust_High_Sal, nm_obs_rdrobust_Low_Sal),
+  bandwidth = c(selected_bndwdth_rdrob_High_Sal,selected_bndwdth_rdrob_Low_Sal),
+  bndw_bias_correct = c(selected_bndwdth_Bias_Corrected_rdrob_High_Sal, selected_bndwdth_Bias_Corrected_rdrob_Low_Sal)
+  
+)
+
+
+
+```
+
+
+
+
+### sex interaction
+
+
+Code for rdrobust with sex interaction:
+```{r rdrobust-interaction-sex , warning = FALSE}
+
+
+
+
+main_data_tbl_logit_female <- main_data_tbl_logit %>% 
+  filter(sex == 'Female')
+
+
+
+main_data_tbl_logit_male <- main_data_tbl_logit %>% 
+  filter(sex == 'Male')
+
+rd_analysis_female <- rdrobust(y = main_data_tbl_logit_female$Vax_within_90,
+                               x = main_data_tbl_logit_female$age_formula_influencer, 
+                               c = 49.5,
+                               h = selected_bandwidth_imbens,
+                               p = 1, # 1 for linear regression
+                               kernel = 'epanechnikov')
+
+
+
+rd_analysis_male <- rdrobust(y = main_data_tbl_logit_male$Vax_within_90,
+                             x = main_data_tbl_logit_male$age_formula_influencer, 
+                             c = 49.5,
+                             h = selected_bandwidth_imbens,
+                             p = 1, # 1 for linear regression
+                             kernel = 'epanechnikov')
+
+
+female_beta <- rd_analysis_female$coef[3]
+female_se <- rd_analysis_female$se[3]
+pvalue_female <- rd_analysis_female$pv[1]
+CI95_low_female <- rd_analysis_female$ci[3,1] 
+CI95_high_female <- rd_analysis_female$ci[3,2] 
+
+pvalue_Female_robust <- rd_analysis_female$pv[3]
+nm_obs_rdrobust_Female <- rd_analysis_female$N[1]+rd_analysis_female$N[2]
+selected_bndwdth_rdrob_Female <- rd_analysis_female$bws[1,1]
+selected_bndwdth_Bias_Corrected_rdrob_Female <- rd_analysis_female$bws[2,1]
+
+
+
+male_beta <- rd_analysis_male$coef[3]
+male_se <- rd_analysis_male$se[3]
+pvalue_male <- rd_analysis_male$pv[1]
+CI95_low_male <- rd_analysis_male$ci[3,1] 
+CI95_high_male <- rd_analysis_male$ci[3,2] 
+
+
+pvalue_Male_robust <- rd_analysis_male$pv[3]
+nm_obs_rdrobust_Male <- rd_analysis_male$N[1]+rd_analysis_male$N[2]
+selected_bndwdth_rdrob_Male <- rd_analysis_male$bws[1,1]
+selected_bndwdth_Bias_Corrected_rdrob_Male <- rd_analysis_male$bws[2,1]
+
+
+
+z_sex <- (female_beta-male_beta)/(sqrt(female_se^2+male_se^2))
+pvalue_sex_rd <- (1-pnorm(abs(z_sex)))*2
+beta_sex <- (female_beta+male_beta)/2
+
+
+
+
+
+results_table_sex_rdrobust <- data.frame(
+  Model = c('Female', 'Male'),
+  Coeff = c( female_beta, male_beta),
+  CI_L = c( CI95_low_female, CI95_low_male),
+  CI_H = c(CI95_high_female, CI95_high_male),
+  P = c(pvalue_female, pvalue_male),
+  P_Robust = c(pvalue_Female_robust,pvalue_Male_robust),
+  
+  P_intrctn = c(pvalue_sex_rd,pvalue_sex_rd),
+  
+  nm_obs = c(nm_obs_rdrobust_Female, nm_obs_rdrobust_Male),
+  bandwidth = c(selected_bndwdth_rdrob_Female,selected_bndwdth_rdrob_Male),
+  bndw_bias_correct = c(selected_bndwdth_Bias_Corrected_rdrob_Female, selected_bndwdth_Bias_Corrected_rdrob_Male)
+  
+)
+
+
+```
+
+
+
+
+# Results Tables
+
+
+
+## Table - All Results
+
+### Main Analysis (Logistic Regression)
+
+```{r discontinuity-LOGREGresults-table, echo=FALSE, message=FALSE, warning=FALSE}
+
+results_table_All_Logreg <- rbind(results_table_Simple_Log,
+                                  results_table_Bandwidth, 
+                                  results_table_Education ,
+                                  results_table_Salary,
+                                  results_table_sex)
+
+
+results_table_All_Logreg$OR <- round( results_table_All_Logreg$OR, digits=2)
+results_table_All_Logreg$CI_L <- round( results_table_All_Logreg$CI_L, digits=2)
+results_table_All_Logreg$CI_H <- round( results_table_All_Logreg$CI_H, digits=2)
+results_table_All_Logreg$P <- round( results_table_All_Logreg$P, digits=4)
+results_table_All_Logreg$P_Robust <- round( results_table_All_Logreg$P_Robust, digits=4)
+results_table_All_Logreg$P_intrctn <- as.numeric(results_table_All_Logreg$P_intrctn )
+results_table_All_Logreg$P_intrctn <- round( results_table_All_Logreg$P_intrctn, digits=4)
+
+results_table_All_Logreg$bandwidth <- round(results_table_All_Logreg$bandwidth, digits=2)
+
+
+
+results_table_All_Logreg %>% 
+  kable %>% 
+  kable_styling('striped', full_width = F) %>% 
+  scroll_box(width = '800' ,height = '600') 
+
+
+```
+
+
+### Sensitivity Analysis (Linear Regression (RDRobust)
+
+```{r discontinuity-RDROBresults-table, echo=FALSE, message=FALSE, warning=FALSE}
+
+
+
+results_table_All_rdrobust <- rbind(
+                                    results_table_Education_rdrobust , 
+                                    results_table_Salary_rdrobust,
+                                    results_table_sex_rdrobust,
+)
+
+results_table_All_rdrobust$Coeff <- round( results_table_All_rdrobust$Coeff*100, digits=2)
+results_table_All_rdrobust$CI_L <- round( results_table_All_rdrobust$CI_L*100, digits=2)
+results_table_All_rdrobust$CI_H <- round( results_table_All_rdrobust$CI_H*100, digits=2)
+results_table_All_rdrobust$P <- round( results_table_All_rdrobust$P, digits=4)
+results_table_All_rdrobust$P_Robust <- round( results_table_All_rdrobust$P_Robust, digits=4)
+results_table_All_rdrobust$P_intrctn <- round( results_table_All_rdrobust$P_intrctn, digits=4)
+
+
+results_table_All_rdrobust$bandwidth <- round(results_table_All_rdrobust$bandwidth, digits=2)
+results_table_All_rdrobust$bndw_bias_correct <- round(results_table_All_rdrobust$bndw_bias_correct, digits=2)
+
+colnames(results_table_All_rdrobust) <- c("Model"      ,       "Coeff(%)"        ,     "CI_L(%)" ,             "CI_H(%)"  , "P"    ,             "P_Robust"     ,     "P_intrctn"    ,     "nm_obs"        ,
+                                          "bandwidth"   ,      "bndw_unbiased")
+library(knitr)
+library(kableExtra)
+
+
+results_table_All_rdrobust %>% 
+  kable %>% 
+  kable_styling('striped', full_width = F) %>% 
+  scroll_box(width = '800' ,height = '600') 
+
+
+```
+
+
